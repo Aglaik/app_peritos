@@ -39,19 +39,23 @@ TOPICOS_PADRAO = [
 # ==========================================
 # 2. INICIALIZAÇÃO DE ESTADO (SESSION STATE)
 # ==========================================
-# O Streamlit recarrega a página a cada interação. 
-# Usamos session_state para não perder os textos digitados e fotos anexadas.
 if "dados_laudo" not in st.session_state:
     st.session_state.dados_laudo = {
         topico: {"rascunho": "", "final": "", "fotos": []} for topico in TOPICOS_PADRAO
     }
+
+# Garante que as chaves dos widgets de texto existam na sessão
+for topico in TOPICOS_PADRAO:
+    if f"txt_rasc_{topico}" not in st.session_state:
+        st.session_state[f"txt_rasc_{topico}"] = ""
+    if f"txt_final_{topico}" not in st.session_state:
+        st.session_state[f"txt_final_{topico}"] = ""
 
 # ==========================================
 # 3. FUNÇÕES AUXILIARES
 # ==========================================
 @st.cache_data
 def carregar_modelos_txt():
-    """Carrega os arquivos TXT uma vez e guarda em cache para não ler do disco toda hora."""
     modelo_1, modelo_2 = "Nenhum modelo de estrutura encontrado.", "Nenhum modelo de palavras encontrado."
     if os.path.exists("LAUDO PERICIAL MODELO.txt"):
         with open("LAUDO PERICIAL MODELO.txt", "r", encoding="utf-8") as f:
@@ -62,11 +66,9 @@ def carregar_modelos_txt():
     return modelo_1, modelo_2
 
 def transcrever_audio(api_key, audio_file_bytes):
-    """Salva o áudio temporariamente, envia para o Gemini transcrever e apaga."""
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-2.5-flash')
     
-    # Criar um arquivo temporário físico para o upload do Gemini
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
         temp_audio.write(audio_file_bytes)
         temp_path = temp_audio.name
@@ -75,17 +77,16 @@ def transcrever_audio(api_key, audio_file_bytes):
         arquivo_gemini = genai.upload_file(path=temp_path)
         prompt = "Transcreva este áudio exatamente como foi falado, de forma precisa. Retorne apenas o texto transcrito, sem introduções."
         response = model.generate_content([prompt, arquivo_gemini])
-        genai.delete_file(arquivo_gemini.name) # Deleta da nuvem
+        genai.delete_file(arquivo_gemini.name)
         return response.text.strip()
     except Exception as e:
         st.error(f"Erro na transcrição: {e}")
         return ""
     finally:
         if os.path.exists(temp_path):
-            os.remove(temp_path) # Deleta do servidor local
+            os.remove(temp_path)
 
 def processar_texto_ia(api_key, tipo_laudo, topico, rascunho, mod1, mod2):
-    """Envia o rascunho para a IA gerar o texto técnico final."""
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-2.5-flash')
     
@@ -117,10 +118,8 @@ def processar_texto_ia(api_key, tipo_laudo, topico, rascunho, mod1, mod2):
         return ""
 
 def gerar_documento_word(tipo_laudo):
-    """Gera o arquivo .docx em memória e retorna os bytes para download."""
     doc = Document()
     
-    # Estilo Normal
     style_normal = doc.styles['Normal']
     font_normal = style_normal.font
     font_normal.name = 'Arial'
@@ -137,12 +136,10 @@ def gerar_documento_word(tipo_laudo):
         if centralizado:
             paragrafo.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    # Cabeçalho do Documento
     formatar_titulo(doc.add_heading('LAUDO PERICIAL', level=1), centralizado=True)
     formatar_titulo(doc.add_heading(f'Natureza da Ocorrência: {tipo_laudo}', level=2), centralizado=True)
     doc.add_paragraph() 
 
-    # Preenchendo as seções
     for topico in TOPICOS_PADRAO:
         dados = st.session_state.dados_laudo[topico]
         texto_final = dados['final']
@@ -155,12 +152,11 @@ def gerar_documento_word(tipo_laudo):
                 doc.add_paragraph(texto_final)
                 
             if fotos:
-                doc.add_paragraph() # Espaço antes das fotos
+                doc.add_paragraph()
                 for foto in fotos:
                     p_img = doc.add_paragraph()
                     p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     run_img = p_img.add_run()
-                    # A foto é lida diretamente da memória (UploadedFile do Streamlit)
                     run_img.add_picture(foto, width=Inches(6.0))
                     
                     p_legenda = doc.add_paragraph("Legenda: _________________________")
@@ -169,7 +165,6 @@ def gerar_documento_word(tipo_laudo):
                         run.font.size = Pt(10)
                         run.font.color.rgb = RGBColor(100, 100, 100)
 
-    # Salva o arquivo em memória ao invés do disco
     arquivo_io = io.BytesIO()
     doc.save(arquivo_io)
     arquivo_io.seek(0)
@@ -182,10 +177,8 @@ st.title("🛡️ Assistente de Laudos Periciais IA")
 
 modelo_1_texto, modelo_2_texto = carregar_modelos_txt()
 
-# --- BARRA LATERAL (CONFIGURAÇÕES E EXPORTAÇÃO) ---
 with st.sidebar:
     st.header("⚙️ Configurações")
-    # Agora a chave não fica fixa no código. Você (ou o usuário) cola ela aqui.
     chave_api = st.text_input("Sua Chave API do Gemini:", type="password", help="Cole sua chave aqui. Ela não será salva.")
     
     st.divider()
@@ -207,7 +200,6 @@ with st.sidebar:
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             )
 
-# --- ÁREA PRINCIPAL (TÓPICOS DO LAUDO) ---
 if not chave_api:
     st.info("👈 Por favor, insira sua Chave API do Gemini na barra lateral para começar a usar as funções de áudio e inteligência artificial.")
 
@@ -217,11 +209,10 @@ for topico in TOPICOS_PADRAO:
     with st.expander(f"📝 {topico}", expanded=False):
         col_esq, col_dir = st.columns([1, 1])
         
-        # --- LADO ESQUERDO: ENTRADAS (Áudio, Texto e Imagens) ---
+        # --- LADO ESQUERDO ---
         with col_esq:
             st.markdown("**1. Entrada de Dados (Rascunho / Áudio)**")
             
-            # Gravação de Áudio Nativa do Streamlit
             audio_gravado = st.audio_input(f"Gravar relato ({topico})", key=f"audio_{topico}")
             
             if st.button("Transcrever Áudio 🎙️", key=f"btn_transcrever_{topico}", disabled=not audio_gravado):
@@ -229,23 +220,24 @@ for topico in TOPICOS_PADRAO:
                     with st.spinner("Transcrevendo..."):
                         texto_transcrito = transcrever_audio(chave_api, audio_gravado.getvalue())
                         if texto_transcrito:
-                            # Atualiza o estado
-                            st.session_state.dados_laudo[topico]['rascunho'] += ("\n" + texto_transcrito).strip()
-                            st.rerun() # Atualiza a tela para mostrar o novo texto
+                            # Adiciona o texto novo ao que já existia na caixa
+                            texto_existente = st.session_state.dados_laudo[topico]['rascunho']
+                            texto_combinado = f"{texto_existente}\n{texto_transcrito}".strip()
+                            
+                            # Atualiza a memória E o componente na tela simultaneamente
+                            st.session_state.dados_laudo[topico]['rascunho'] = texto_combinado
+                            st.session_state[f"txt_rasc_{topico}"] = texto_combinado
+                            st.rerun()
                 else:
                     st.error("Insira a chave da API na lateral.")
 
-            # Campo de Texto do Rascunho (pode ser editado manualmente ou preenchido pela IA)
             rascunho_atual = st.text_area(
                 "Texto Rascunho:", 
-                value=st.session_state.dados_laudo[topico]['rascunho'], 
                 height=150, 
                 key=f"txt_rasc_{topico}"
             )
-            # Salva o que for digitado no estado
             st.session_state.dados_laudo[topico]['rascunho'] = rascunho_atual
             
-            # Anexo de Fotos
             fotos_upadas = st.file_uploader(
                 "Anexar Fotos para esta seção", 
                 type=["jpg", "jpeg", "png"], 
@@ -255,7 +247,7 @@ for topico in TOPICOS_PADRAO:
             if fotos_upadas:
                 st.session_state.dados_laudo[topico]['fotos'] = fotos_upadas
 
-        # --- LADO DIREITO: PROCESSAMENTO E TEXTO FINAL ---
+        # --- LADO DIREITO ---
         with col_dir:
             st.markdown("**2. Processamento IA e Texto Final**")
             
@@ -275,15 +267,14 @@ for topico in TOPICOS_PADRAO:
                             modelo_2_texto
                         )
                         if texto_gerado:
+                            # Atualiza a memória E o componente na tela simultaneamente
                             st.session_state.dados_laudo[topico]['final'] = texto_gerado
+                            st.session_state[f"txt_final_{topico}"] = texto_gerado
                             st.rerun()
 
-            # Campo de Texto Final
             texto_final_atual = st.text_area(
                 "Texto Convertido (Pronto para o Laudo):", 
-                value=st.session_state.dados_laudo[topico]['final'], 
                 height=250, 
                 key=f"txt_final_{topico}"
             )
-            # Permite que o perito edite o texto final gerado pela IA antes de exportar
             st.session_state.dados_laudo[topico]['final'] = texto_final_atual
