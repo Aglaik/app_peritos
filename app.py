@@ -1,7 +1,7 @@
 import streamlit as st
 import google.generativeai as genai
 from docx import Document
-from docx.shared import Pt, RGBColor, Inches
+from docx.shared import Pt, RGBColor, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import os
 import io
@@ -41,10 +41,10 @@ TOPICOS_PADRAO = [
 # ==========================================
 if "dados_laudo" not in st.session_state:
     st.session_state.dados_laudo = {
-        topico: {"rascunho": "", "final": "", "fotos": []} for topico in TOPICOS_PADRAO
+        # Foi adicionado a chave 'incluir' com padrão True
+        topico: {"rascunho": "", "final": "", "fotos": [], "incluir": True} for topico in TOPICOS_PADRAO
     }
 
-# Garante que as chaves dos widgets de texto existam na sessão
 for topico in TOPICOS_PADRAO:
     if f"txt_rasc_{topico}" not in st.session_state:
         st.session_state[f"txt_rasc_{topico}"] = ""
@@ -117,53 +117,92 @@ def processar_texto_ia(api_key, tipo_laudo, topico, rascunho, mod1, mod2):
         st.error(f"Erro na geração de texto: {e}")
         return ""
 
-def gerar_documento_word(tipo_laudo):
-    doc = Document()
-    
-    style_normal = doc.styles['Normal']
-    font_normal = style_normal.font
-    font_normal.name = 'Arial'
-    font_normal.size = Pt(12)
-    style_normal.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    style_normal.paragraph_format.line_spacing = 1.5
-    
-    def formatar_titulo(paragrafo, tamanho=12, negrito=True, centralizado=False):
-        for run in paragrafo.runs:
-            run.font.name = 'Arial'
-            run.font.size = Pt(tamanho)
-            run.font.color.rgb = RGBColor(0, 0, 0)
-            run.font.bold = negrito
-        if centralizado:
-            paragrafo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+def gerar_documento_word(tipo_laudo, arquivo_template=None):
+    # Se o usuário enviou um template, abre ele para manter capa, rodapé e cabeçalho.
+    if arquivo_template is not None:
+        doc = Document(io.BytesIO(arquivo_template.getvalue()))
+    else:
+        # Se não enviou, cria um em branco e faz um cabeçalho simples.
+        doc = Document()
+        p_titulo = doc.add_paragraph()
+        p_titulo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run_titulo = p_titulo.add_run('LAUDO PERICIAL\n\n')
+        run_titulo.font.name = 'Arial'
+        run_titulo.font.size = Pt(12)
+        run_titulo.font.bold = True
+        
+        p_sub = doc.add_paragraph()
+        p_sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run_sub = p_sub.add_run(f'Natureza da Ocorrência: {tipo_laudo}')
+        run_sub.font.name = 'Arial'
+        run_sub.font.size = Pt(12)
+        run_sub.font.bold = True
+        doc.add_paragraph() 
 
-    formatar_titulo(doc.add_heading('LAUDO PERICIAL', level=1), centralizado=True)
-    formatar_titulo(doc.add_heading(f'Natureza da Ocorrência: {tipo_laudo}', level=2), centralizado=True)
-    doc.add_paragraph() 
+    contador_topico = 1
+    contador_foto = 1
 
     for topico in TOPICOS_PADRAO:
         dados = st.session_state.dados_laudo[topico]
+        
+        # Ignora o tópico se o usuário desmarcou a opção de incluir
+        if not dados.get('incluir', True):
+            continue
+            
         texto_final = dados['final']
         fotos = dados['fotos']
         
         if texto_final or fotos:
-            formatar_titulo(doc.add_heading(topico, level=3))
+            # 1. Título do Tópico: Maiúsculo, Negrito, Tamanho 14, Numerado
+            p_heading = doc.add_paragraph()
+            run_heading = p_heading.add_run(f"{contador_topico}. {topico.upper()}")
+            run_heading = p_heading.add_run(f"\n")  # Adiciona quebra de linha após o título
+            run_heading.font.name = 'Arial'
+            run_heading.font.size = Pt(14)
+            run_heading.font.bold = True
             
+            # 2. Texto do Tópico: Fonte 12 e Justificado (CORRIGIDO AQUI)
             if texto_final:
-                doc.add_paragraph(texto_final)
+                # Divide o texto onde houver \n
+                linhas = texto_final.split('\n')
                 
+                for linha in linhas:
+                    # Verifica se a linha não está vazia
+                    if linha.strip(): 
+                        # Limpa espaços duplos que atrapalham a justificação
+                        linha_limpa = linha.strip().replace("  ", " ")
+                        
+                        p_text = doc.add_paragraph(linha_limpa)
+                        p_text.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                        
+                        for run in p_text.runs:
+                            run.font.name = 'Arial'
+                            run.font.size = Pt(12)
+                
+            # 3. Tratamento das Fotos
             if fotos:
-                doc.add_paragraph()
                 for foto in fotos:
+                    # Inserção da Imagem
                     p_img = doc.add_paragraph()
                     p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    run_img = p_img.add_run()
-                    run_img.add_picture(foto, width=Inches(6.0))
+                    p_img.paragraph_format.space_after = Pt(0) # Retira espaço abaixo da foto
                     
-                    p_legenda = doc.add_paragraph("Legenda: _________________________")
+                    run_img = p_img.add_run()
+                    # Define dimensão exata 14.67 de largura por 11.0 de altura (Formato Paisagem/Retrato)
+                    run_img.add_picture(foto, width=Cm(14.67), height=Cm(11.0))
+                    
+                    # Legenda da Imagem colada na foto
+                    p_legenda = doc.add_paragraph()
                     p_legenda.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    for run in p_legenda.runs:
-                        run.font.size = Pt(10)
-                        run.font.color.rgb = RGBColor(100, 100, 100)
+                    p_legenda.paragraph_format.space_before = Pt(0) # Retira espaço acima da legenda
+                    
+                    run_legenda = p_legenda.add_run(f"Imagem {contador_foto} - _________________________")
+                    run_legenda.font.name = 'Arial'
+                    run_legenda.font.size = Pt(10)
+                    
+                    contador_foto += 1 # Incrementa o número global da foto
+            
+            contador_topico += 1 # Incrementa o número do tópico para o próximo
 
     arquivo_io = io.BytesIO()
     doc.save(arquivo_io)
@@ -186,13 +225,21 @@ with st.sidebar:
     st.header("📄 Dados do Laudo")
     tipo_laudo_selecionado = st.selectbox("Tipo de Ocorrência:", TIPOS_LAUDO)
     
+    # Campo Novo: Upload do Template
+    st.markdown("**Modelo de Documento (Opcional)**")
+    template_upload = st.file_uploader(
+        "Faça o upload do documento padrão (.docx) com capa e rodapé.", 
+        type=["docx"],
+        help="Se enviado, o laudo será adicionado no final deste documento original."
+    )
+    
     st.divider()
     st.header("📥 Exportar")
     if st.button("Gerar Arquivo Word", type="primary"):
         if not chave_api:
             st.warning("Insira sua chave de API do Gemini para garantir que o laudo foi finalizado.")
         else:
-            docx_bytes = gerar_documento_word(tipo_laudo_selecionado)
+            docx_bytes = gerar_documento_word(tipo_laudo_selecionado, template_upload)
             st.download_button(
                 label="Baixar Laudo (.docx)",
                 data=docx_bytes,
@@ -207,74 +254,82 @@ st.markdown("### Preencha as seções abaixo:")
 
 for topico in TOPICOS_PADRAO:
     with st.expander(f"📝 {topico}", expanded=False):
-        col_esq, col_dir = st.columns([1, 1])
         
-        # --- LADO ESQUERDO ---
-        with col_esq:
-            st.markdown("**1. Entrada de Dados (Rascunho / Áudio)**")
+        # Checkbox para incluir ou não o tópico no Word Final
+        incluir_checkbox = st.checkbox(
+            "✅ Incluir este tópico no documento gerado", 
+            value=st.session_state.dados_laudo[topico].get('incluir', True), 
+            key=f"check_{topico}"
+        )
+        st.session_state.dados_laudo[topico]['incluir'] = incluir_checkbox
+        
+        # Opcional: Se desmarcar, oculta o conteúdo para o layout ficar mais limpo
+        if incluir_checkbox:
+            col_esq, col_dir = st.columns([1, 1])
             
-            audio_gravado = st.audio_input(f"Gravar relato ({topico})", key=f"audio_{topico}")
-            
-            if st.button("Transcrever Áudio 🎙️", key=f"btn_transcrever_{topico}", disabled=not audio_gravado):
-                if chave_api:
-                    with st.spinner("Transcrevendo..."):
-                        texto_transcrito = transcrever_audio(chave_api, audio_gravado.getvalue())
-                        if texto_transcrito:
-                            # Adiciona o texto novo ao que já existia na caixa
-                            texto_existente = st.session_state.dados_laudo[topico]['rascunho']
-                            texto_combinado = f"{texto_existente}\n{texto_transcrito}".strip()
-                            
-                            # Atualiza a memória E o componente na tela simultaneamente
-                            st.session_state.dados_laudo[topico]['rascunho'] = texto_combinado
-                            st.session_state[f"txt_rasc_{topico}"] = texto_combinado
-                            st.rerun()
-                else:
-                    st.error("Insira a chave da API na lateral.")
+            # --- LADO ESQUERDO ---
+            with col_esq:
+                st.markdown("**1. Entrada de Dados (Rascunho / Áudio)**")
+                
+                audio_gravado = st.audio_input(f"Gravar relato ({topico})", key=f"audio_{topico}")
+                
+                if st.button("Transcrever Áudio 🎙️", key=f"btn_transcrever_{topico}", disabled=not audio_gravado):
+                    if chave_api:
+                        with st.spinner("Transcrevendo..."):
+                            texto_transcrito = transcrever_audio(chave_api, audio_gravado.getvalue())
+                            if texto_transcrito:
+                                texto_existente = st.session_state.dados_laudo[topico]['rascunho']
+                                texto_combinado = f"{texto_existente}\n{texto_transcrito}".strip()
+                                
+                                st.session_state.dados_laudo[topico]['rascunho'] = texto_combinado
+                                st.session_state[f"txt_rasc_{topico}"] = texto_combinado
+                                st.rerun()
+                    else:
+                        st.error("Insira a chave da API na lateral.")
 
-            rascunho_atual = st.text_area(
-                "Texto Rascunho:", 
-                height=150, 
-                key=f"txt_rasc_{topico}"
-            )
-            st.session_state.dados_laudo[topico]['rascunho'] = rascunho_atual
-            
-            fotos_upadas = st.file_uploader(
-                "Anexar Fotos para esta seção", 
-                type=["jpg", "jpeg", "png"], 
-                accept_multiple_files=True, 
-                key=f"fotos_{topico}"
-            )
-            if fotos_upadas:
-                st.session_state.dados_laudo[topico]['fotos'] = fotos_upadas
+                rascunho_atual = st.text_area(
+                    "Texto Rascunho:", 
+                    height=150, 
+                    key=f"txt_rasc_{topico}"
+                )
+                st.session_state.dados_laudo[topico]['rascunho'] = rascunho_atual
+                
+                fotos_upadas = st.file_uploader(
+                    "Anexar Fotos para esta seção", 
+                    type=["jpg", "jpeg", "png"], 
+                    accept_multiple_files=True, 
+                    key=f"fotos_{topico}"
+                )
+                if fotos_upadas:
+                    st.session_state.dados_laudo[topico]['fotos'] = fotos_upadas
 
-        # --- LADO DIREITO ---
-        with col_dir:
-            st.markdown("**2. Processamento IA e Texto Final**")
-            
-            if st.button("🪄 Converter p/ Laudo (IA)", key=f"btn_ia_{topico}", type="secondary"):
-                if not chave_api:
-                    st.error("Insira a chave da API na lateral.")
-                elif not rascunho_atual.strip():
-                    st.warning("Não há rascunho para converter. Escreva ou grave um áudio.")
-                else:
-                    with st.spinner("Processando linguagem técnica..."):
-                        texto_gerado = processar_texto_ia(
-                            chave_api, 
-                            tipo_laudo_selecionado, 
-                            topico, 
-                            rascunho_atual, 
-                            modelo_1_texto, 
-                            modelo_2_texto
-                        )
-                        if texto_gerado:
-                            # Atualiza a memória E o componente na tela simultaneamente
-                            st.session_state.dados_laudo[topico]['final'] = texto_gerado
-                            st.session_state[f"txt_final_{topico}"] = texto_gerado
-                            st.rerun()
+            # --- LADO DIREITO ---
+            with col_dir:
+                st.markdown("**2. Processamento IA e Texto Final**")
+                
+                if st.button("🪄 Converter p/ Laudo (IA)", key=f"btn_ia_{topico}", type="secondary"):
+                    if not chave_api:
+                        st.error("Insira a chave da API na lateral.")
+                    elif not rascunho_atual.strip():
+                        st.warning("Não há rascunho para converter. Escreva ou grave um áudio.")
+                    else:
+                        with st.spinner("Processando linguagem técnica..."):
+                            texto_gerado = processar_texto_ia(
+                                chave_api, 
+                                tipo_laudo_selecionado, 
+                                topico, 
+                                rascunho_atual, 
+                                modelo_1_texto, 
+                                modelo_2_texto
+                            )
+                            if texto_gerado:
+                                st.session_state.dados_laudo[topico]['final'] = texto_gerado
+                                st.session_state[f"txt_final_{topico}"] = texto_gerado
+                                st.rerun()
 
-            texto_final_atual = st.text_area(
-                "Texto Convertido (Pronto para o Laudo):", 
-                height=250, 
-                key=f"txt_final_{topico}"
-            )
-            st.session_state.dados_laudo[topico]['final'] = texto_final_atual
+                texto_final_atual = st.text_area(
+                    "Texto Convertido (Pronto para o Laudo):", 
+                    height=250, 
+                    key=f"txt_final_{topico}"
+                )
+                st.session_state.dados_laudo[topico]['final'] = texto_final_atual
