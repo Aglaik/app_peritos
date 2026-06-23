@@ -1,18 +1,21 @@
 import streamlit as st
 import google.generativeai as genai
 from docx import Document
-from docx.shared import Pt, RGBColor, Cm
+from docx.shared import Pt, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import os
 import io
 import tempfile
+import uuid
+import requests
+import PIL.Image
+from streamlit_geolocation import streamlit_geolocation
 
 # ==========================================
 # 1. CONFIGURAÇÕES INICIAIS DA PÁGINA
 # ==========================================
 st.set_page_config(
-    page_title="Assistente de Laudos Periciais IA",
-    page_icon="🛡️",
+    page_title="Assistente de Laudos Periciais",
     layout="wide"
 )
 
@@ -39,17 +42,40 @@ TOPICOS_PADRAO = [
 # ==========================================
 # 2. INICIALIZAÇÃO DE ESTADO (SESSION STATE)
 # ==========================================
-if "dados_laudo" not in st.session_state:
-    st.session_state.dados_laudo = {
-        # Foi adicionado a chave 'incluir' com padrão True
-        topico: {"rascunho": "", "final": "", "fotos": [], "incluir": True} for topico in TOPICOS_PADRAO
+# Migração do Banco de Frases para a memória da sessão para permitir adições dinâmicas
+if "frases_padrao" not in st.session_state:
+    st.session_state.frases_padrao = {
+        "Local não preservado": "O local de crime não se encontrava idoneamente preservado, havendo sinais claros de alteração na disposição original dos vestígios, o que prejudica parcialmente a análise pericial da dinâmica dos fatos.",
+        "Local preservado": "O local encontrava-se adequadamente isolado e preservado pela guarnição da Polícia Militar, garantindo a inalterabilidade dos vestígios até a chegada da equipe pericial.",
+        "Constatação de Drogas (Cocaína)": "Para a constatação preliminar da natureza da substância, utilizou-se o teste colorimétrico com reagente de Scott (Tiocianato de Cobalto), o qual apresentou coloração azul intensa, indicativo positivo para a presença de alcaloides (cocaína).",
+        "Constatação de Drogas (Maconha)": "Realizou-se o teste colorimétrico com o reagente de Fast Blue B, observando-se a formação de coloração avermelhada/purpúrea, indicativo positivo para a presença de canabinoides (Cannabis sativa L.).",
+        "Cadáver - Posição e Decúbito": "O cadáver encontrava-se no solo, em decúbito [dorsal/ventral/lateral], com os membros superiores e inferiores em posição de abandono."
     }
 
-for topico in TOPICOS_PADRAO:
-    if f"txt_rasc_{topico}" not in st.session_state:
-        st.session_state[f"txt_rasc_{topico}"] = ""
-    if f"txt_final_{topico}" not in st.session_state:
-        st.session_state[f"txt_final_{topico}"] = ""
+def criar_secao(titulo, nivel=1):
+    return {
+        "id": str(uuid.uuid4()),
+        "titulo": titulo,
+        "nivel": nivel,  
+        "incluir": True,
+        "rascunho": "",
+        "final": "",
+        "fotos": [],
+        "fila_audios": [] 
+    }
+
+if "secoes_laudo" not in st.session_state:
+    st.session_state.secoes_laudo = [criar_secao(t) for t in TOPICOS_PADRAO]
+
+if "mapa_gps" not in st.session_state:
+    st.session_state.mapa_gps = None
+
+for secao in st.session_state.secoes_laudo:
+    id_sec = secao["id"]
+    if f"txt_rasc_{id_sec}" not in st.session_state:
+        st.session_state[f"txt_rasc_{id_sec}"] = secao["rascunho"]
+    if f"txt_final_{id_sec}" not in st.session_state:
+        st.session_state[f"txt_final_{id_sec}"] = secao["final"]
 
 # ==========================================
 # 3. FUNÇÕES AUXILIARES
@@ -91,24 +117,12 @@ def processar_texto_ia(api_key, tipo_laudo, topico, rascunho, mod1, mod2):
     model = genai.GenerativeModel('gemini-2.5-flash')
     
     prompt = f"""
-    Você é um Perito Criminal sênior. Sua tarefa é analisar o relato falado do perito de campo e reescrever o texto em linguagem técnica, formal e objetiva para compor APENAS a seção específica solicitada do laudo.
-    
-    TIPO DA OCORRÊNCIA: {tipo_laudo}
-    SEÇÃO A SER REDIGIDA: {topico}
-    
-    REGRAS ABSOLUTAS:
-    1. Escreva SOMENTE o que pertence ao tópico solicitado ({topico}). Não adicione informações de outros tópicos, introduções gerais ou encerramentos do laudo inteiro.
-    2. Corrija gírias, linguagem coloquial e estruture os parágrafos de forma técnica.
-    3. Utilize obrigatoriamente a estrutura técnica, o tom e as palavras-chave adequadas com base nos modelos fornecidos abaixo.
-    
-    === MODELO DE ESTRUTURA ===
-    {mod1}
-    
-    === MODELO DE PALAVRAS E ESTILO ===
-    {mod2}
-    
-    === RELATO DO PERITO (RASCUNHO A SER CONVERTIDO) ===
-    {rascunho}
+    Você é um Perito Criminal sênior. Analise o relato e reescreva em linguagem técnica e objetiva para compor APENAS a seção específica do laudo.
+    TIPO: {tipo_laudo} | SEÇÃO: {topico}
+    REGRAS: 1. Escreva SOMENTE o que pertence ao tópico. 2. Corrija gírias e use estrutura técnica.
+    MODELO ESTRUTURA: {mod1}
+    MODELO ESTILO: {mod2}
+    RASCUNHO: {rascunho}
     """
     try:
         response = model.generate_content(prompt)
@@ -117,92 +131,112 @@ def processar_texto_ia(api_key, tipo_laudo, topico, rascunho, mod1, mod2):
         st.error(f"Erro na geração de texto: {e}")
         return ""
 
+def gerar_legenda_foto_ia(api_key, image_bytes):
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel('gemini-2.5-flash')
+    img = PIL.Image.open(io.BytesIO(image_bytes))
+    prompt = "Você é um perito criminal de campo. Crie uma legenda curta, técnica e puramente descritiva (1 frase) para esta foto de local de crime ou vestígio. Não faça deduções, descreva o que é visível com jargão pericial."
+    try:
+        response = model.generate_content([prompt, img])
+        return response.text.strip()
+    except Exception as e:
+        return f"Erro ao gerar legenda: {e}"
+
+def buscar_mapa_satelite(lat, lon, api_key_maps=""):
+    if api_key_maps:
+        url = f"https://maps.googleapis.com/maps/api/staticmap?center={lat},{lon}&zoom=18&size=600x400&maptype=satellite&markers=color:red%7C{lat},{lon}&key={api_key_maps}"
+        resp = requests.get(url)
+        if resp.status_code == 200: return resp.content
+    else:
+        url = f"https://static-maps.yandex.ru/1.x/?ll={lon},{lat}&z=16&l=sat,skl&size=600,400&pt={lon},{lat},pm2rdl"
+        try:
+            resp = requests.get(url)
+            if resp.status_code == 200: return resp.content
+        except: pass
+    return None
+
 def gerar_documento_word(tipo_laudo, arquivo_template=None):
-    # Se o usuário enviou um template, abre ele para manter capa, rodapé e cabeçalho.
     if arquivo_template is not None:
         doc = Document(io.BytesIO(arquivo_template.getvalue()))
     else:
-        # Se não enviou, cria um em branco e faz um cabeçalho simples.
         doc = Document()
         p_titulo = doc.add_paragraph()
         p_titulo.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run_titulo = p_titulo.add_run('LAUDO PERICIAL\n\n')
-        run_titulo.font.name = 'Arial'
-        run_titulo.font.size = Pt(12)
-        run_titulo.font.bold = True
+        run_titulo.font.name, run_titulo.font.size, run_titulo.font.bold = 'Arial', Pt(12), True
         
         p_sub = doc.add_paragraph()
         p_sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run_sub = p_sub.add_run(f'Natureza da Ocorrência: {tipo_laudo}')
-        run_sub.font.name = 'Arial'
-        run_sub.font.size = Pt(12)
-        run_sub.font.bold = True
+        run_sub.font.name, run_sub.font.size, run_sub.font.bold = 'Arial', Pt(12), True
         doc.add_paragraph() 
 
-    contador_topico = 1
+    contador_topico = 0
+    contador_subtopico = 0
     contador_foto = 1
+    mapa_inserido = False
 
-    for topico in TOPICOS_PADRAO:
-        dados = st.session_state.dados_laudo[topico]
-        
-        # Ignora o tópico se o usuário desmarcou a opção de incluir
-        if not dados.get('incluir', True):
-            continue
+    for secao in st.session_state.secoes_laudo:
+        if not secao.get('incluir', True): continue
             
-        texto_final = dados['final']
-        fotos = dados['fotos']
+        if "exames" in secao['titulo'].lower() and st.session_state.mapa_gps and not mapa_inserido:
+            p_mapa = doc.add_paragraph()
+            p_mapa.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run_mapa = p_mapa.add_run()
+            run_mapa.add_picture(io.BytesIO(st.session_state.mapa_gps['bytes']), width=Cm(14.67))
+            
+            p_leg_mapa = doc.add_paragraph()
+            p_leg_mapa.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run_leg_mapa = p_leg_mapa.add_run(f"Imagem {contador_foto} - {st.session_state.mapa_gps['legenda']}")
+            run_leg_mapa.font.name, run_leg_mapa.font.size = 'Arial', Pt(10)
+            contador_foto += 1
+            mapa_inserido = True
+            doc.add_paragraph()
+
+        texto_final = secao['final']
+        fotos = secao['fotos']
         
-        if texto_final or fotos:
-            # 1. Título do Tópico: Maiúsculo, Negrito, Tamanho 14, Numerado
+        if texto_final or fotos or secao['titulo']:
+            if secao['nivel'] == 1:
+                contador_topico += 1
+                contador_subtopico = 0
+                titulo_exibicao = f"{contador_topico}. {secao['titulo'].upper()}"
+                tamanho_fonte = 14
+            else:
+                contador_subtopico += 1
+                titulo_exibicao = f"{contador_topico}.{contador_subtopico}. {secao['titulo']}"
+                tamanho_fonte = 13
+
             p_heading = doc.add_paragraph()
-            run_heading = p_heading.add_run(f"{contador_topico}. {topico.upper()}")
-            run_heading = p_heading.add_run(f"\n")  # Adiciona quebra de linha após o título
-            run_heading.font.name = 'Arial'
-            run_heading.font.size = Pt(14)
-            run_heading.font.bold = True
+            run_heading = p_heading.add_run(f"{titulo_exibicao}\n")
+            run_heading.font.name, run_heading.font.size, run_heading.font.bold = 'Arial', Pt(tamanho_fonte), True
             
-            # 2. Texto do Tópico: Fonte 12 e Justificado (CORRIGIDO AQUI)
             if texto_final:
-                # Divide o texto onde houver \n
-                linhas = texto_final.split('\n')
-                
-                for linha in linhas:
-                    # Verifica se a linha não está vazia
+                for linha in texto_final.split('\n'):
                     if linha.strip(): 
-                        # Limpa espaços duplos que atrapalham a justificação
-                        linha_limpa = linha.strip().replace("  ", " ")
-                        
-                        p_text = doc.add_paragraph(linha_limpa)
+                        p_text = doc.add_paragraph(linha.strip().replace("  ", " "))
                         p_text.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-                        
-                        for run in p_text.runs:
-                            run.font.name = 'Arial'
-                            run.font.size = Pt(12)
+                        for run in p_text.runs: run.font.name, run.font.size = 'Arial', Pt(12)
                 
-            # 3. Tratamento das Fotos
             if fotos:
-                for foto in fotos:
-                    # Inserção da Imagem
+                for foto_dict in fotos:
                     p_img = doc.add_paragraph()
                     p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    p_img.paragraph_format.space_after = Pt(0) # Retira espaço abaixo da foto
+                    p_img.paragraph_format.space_after = Pt(0)
                     
                     run_img = p_img.add_run()
-                    # Define dimensão exata 14.67 de largura por 11.0 de altura (Formato Paisagem/Retrato)
-                    run_img.add_picture(foto, width=Cm(14.67), height=Cm(11.0))
+                    run_img.add_picture(io.BytesIO(foto_dict['bytes']), width=Cm(14.67))
                     
-                    # Legenda da Imagem colada na foto
                     p_legenda = doc.add_paragraph()
                     p_legenda.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    p_legenda.paragraph_format.space_before = Pt(0) # Retira espaço acima da legenda
+                    p_legenda.paragraph_format.space_before = Pt(0)
                     
-                    run_legenda = p_legenda.add_run(f"Imagem {contador_foto} - _________________________")
-                    run_legenda.font.name = 'Arial'
-                    run_legenda.font.size = Pt(10)
+                    legenda_texto = foto_dict.get('legenda', '').strip()
+                    if not legenda_texto: legenda_texto = "_________________________"
                     
-                    contador_foto += 1 # Incrementa o número global da foto
-            
-            contador_topico += 1 # Incrementa o número do tópico para o próximo
+                    run_legenda = p_legenda.add_run(f"Imagem {contador_foto} - {legenda_texto}")
+                    run_legenda.font.name, run_legenda.font.size = 'Arial', Pt(10)
+                    contador_foto += 1
 
     arquivo_io = io.BytesIO()
     doc.save(arquivo_io)
@@ -212,124 +246,208 @@ def gerar_documento_word(tipo_laudo, arquivo_template=None):
 # ==========================================
 # 4. INTERFACE PRINCIPAL (UI)
 # ==========================================
-st.title("🛡️ Assistente de Laudos Periciais IA")
+st.title("Assistente de Laudos AG-Laudos")
 
 modelo_1_texto, modelo_2_texto = carregar_modelos_txt()
 
 with st.sidebar:
-    st.header("⚙️ Configurações")
-    chave_api = st.text_input("Sua Chave API do Gemini:", type="password", help="Cole sua chave aqui. Ela não será salva.")
+    st.header("Controle do Laudo")
     
-    st.divider()
+    with st.expander("Configurações de Integração", expanded=False):
+        chave_api = st.text_input("Chave API (Google Gemini):", type="password")
+        chave_maps = st.text_input("Chave API (Google Maps - Opcional):", type="password", help="Garante mapa com satélite de alta qualidade.")
     
-    st.header("📄 Dados do Laudo")
-    tipo_laudo_selecionado = st.selectbox("Tipo de Ocorrência:", TIPOS_LAUDO)
+    with st.expander("Georreferenciamento", expanded=False):
+        st.markdown("Obtenha as coordenadas geográficas. A imagem de satélite será anexada antes da seção **Dos Exames**.")
+        localizacao = streamlit_geolocation()
+        if localizacao and localizacao.get('latitude'):
+            lat, lon = localizacao['latitude'], localizacao['longitude']
+            st.success(f"Latitude: {lat:.5f} | Longitude: {lon:.5f}")
+            
+            if st.button("Anexar Mapa ao Documento", use_container_width=True):
+                with st.spinner("Realizando busca de satélite..."):
+                    img_mapa = buscar_mapa_satelite(lat, lon, chave_maps)
+                    if img_mapa:
+                        st.session_state.mapa_gps = {
+                            "bytes": img_mapa,
+                            "legenda": f"Vista de satélite do local georreferenciado. Coordenadas obtidas: {lat}, {lon}."
+                        }
+                        st.success("Mapa inserido no escopo do laudo.")
+                    else:
+                        st.error("Falha ao obter imagem de satélite.")
+                        
+        if st.session_state.mapa_gps:
+            st.image(st.session_state.mapa_gps['bytes'], caption="Mapa Capturado")
+            if st.button("Remover Mapa", use_container_width=True):
+                st.session_state.mapa_gps = None
+                st.rerun()
+
+    with st.expander("Informações do Laudo", expanded=False):
+        tipo_laudo_selecionado = st.selectbox("Natureza da Ocorrência:", TIPOS_LAUDO)
+        template_upload = st.file_uploader("Documento Padrão - Base (.docx)", type=["docx"])
     
-    # Campo Novo: Upload do Template
-    st.markdown("**Modelo de Documento (Opcional)**")
-    template_upload = st.file_uploader(
-        "Faça o upload do documento padrão (.docx) com capa e rodapé.", 
-        type=["docx"],
-        help="Se enviado, o laudo será adicionado no final deste documento original."
-    )
-    
-    st.divider()
-    st.header("📥 Exportar")
-    if st.button("Gerar Arquivo Word", type="primary"):
-        if not chave_api:
-            st.warning("Insira sua chave de API do Gemini para garantir que o laudo foi finalizado.")
-        else:
+    with st.expander("Estrutura do Documento", expanded=False):
+        st.markdown("**Adicionar Novo Tópico**")
+        novo_topico = st.text_input("Título do Novo Tópico Principal:")
+        
+        topicos_principais_atual = [s for s in st.session_state.secoes_laudo if s['nivel'] == 1]
+        opcoes_posicao = ["Inserir no início"] + [f"Após: {t['titulo']}" for t in topicos_principais_atual]
+        posicao_selecionada = st.selectbox("Posição de Inserção:", opcoes_posicao)
+
+        if st.button("Inserir Tópico", use_container_width=True):
+            if novo_topico.strip():
+                nova_sec = criar_secao(novo_topico.strip(), nivel=1)
+                if posicao_selecionada == "Inserir no início":
+                    st.session_state.secoes_laudo.insert(0, nova_sec)
+                else:
+                    titulo_alvo = posicao_selecionada.replace("Após: ", "")
+                    idx_insercao = len(st.session_state.secoes_laudo)
+                    for i, sec in enumerate(st.session_state.secoes_laudo):
+                        if sec['titulo'] == titulo_alvo and sec['nivel'] == 1:
+                            j = i + 1
+                            while j < len(st.session_state.secoes_laudo) and st.session_state.secoes_laudo[j]['nivel'] > 1:
+                                j += 1
+                            idx_insercao = j
+                            break
+                    st.session_state.secoes_laudo.insert(idx_insercao, nova_sec)
+                st.rerun()
+        
+        st.markdown("---")
+        st.markdown("**Adicionar Novo Subtópico**")
+        if topicos_principais_atual:
+            opcoes_pai = {s['id']: s['titulo'] for s in topicos_principais_atual}
+            pai_selecionado = st.selectbox("Vincular subtópico à seção:", options=list(opcoes_pai.keys()), format_func=lambda x: opcoes_pai[x])
+            novo_subtopico = st.text_input("Título do Subtópico:")
+            if st.button("Inserir Subtópico", use_container_width=True):
+                if novo_subtopico.strip():
+                    idx_pai = next(i for i, s in enumerate(st.session_state.secoes_laudo) if s['id'] == pai_selecionado)
+                    idx_insercao = idx_pai + 1
+                    while idx_insercao < len(st.session_state.secoes_laudo) and st.session_state.secoes_laudo[idx_insercao]['nivel'] > 1:
+                        idx_insercao += 1
+                    nova_subsec = criar_secao(novo_subtopico.strip(), nivel=2)
+                    st.session_state.secoes_laudo.insert(idx_insercao, nova_subsec)
+                    st.rerun()
+
+    with st.expander("Textos Padrão (Snippets)", expanded=False):
+        st.markdown("Alimente o banco de dados com jargões e textos frequentemente utilizados.")
+        novo_titulo_snippet = st.text_input("Nome de Referência:")
+        novo_texto_snippet = st.text_area("Conteúdo Técnico:")
+        if st.button("Salvar Texto Padrão", use_container_width=True):
+            if novo_titulo_snippet.strip() and novo_texto_snippet.strip():
+                st.session_state.frases_padrao[novo_titulo_snippet.strip()] = novo_texto_snippet.strip()
+                st.success("Texto padrão registrado com sucesso.")
+                st.rerun()
+
+    with st.expander("Exportação", expanded=True):
+        if st.button("Gerar Documento Word", type="primary", use_container_width=True):
             docx_bytes = gerar_documento_word(tipo_laudo_selecionado, template_upload)
             st.download_button(
-                label="Baixar Laudo (.docx)",
-                data=docx_bytes,
+                label="Baixar Arquivo Final (.docx)", data=docx_bytes,
                 file_name=f"laudo_{tipo_laudo_selecionado.replace(' ', '_').lower()}.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True
             )
 
-if not chave_api:
-    st.info("👈 Por favor, insira sua Chave API do Gemini na barra lateral para começar a usar as funções de áudio e inteligência artificial.")
+if not chave_api: 
+    st.info("Insira a chave de integração da API do Gemini na barra lateral para ativar funções automáticas.")
 
-st.markdown("### Preencha as seções abaixo:")
+st.markdown("### Preenchimento de Seções do Laudo")
 
-for topico in TOPICOS_PADRAO:
-    with st.expander(f"📝 {topico}", expanded=False):
+for idx_secao, secao in enumerate(st.session_state.secoes_laudo):
+    sec_id = secao['id']
+    prefixo_exibicao = "Seção:" if secao['nivel'] == 1 else "Subseção:"
+    
+    with st.expander(f"{prefixo_exibicao} {secao['titulo']}", expanded=False):
+        c_head1, c_head2 = st.columns([4, 1])
+        with c_head1:
+            secao['incluir'] = st.checkbox("Incluir esta seção no documento final", value=secao.get('incluir', True), key=f"check_{sec_id}")
+        with c_head2:
+            if st.button("Excluir Seção", key=f"del_sec_{sec_id}"):
+                st.session_state.secoes_laudo.pop(idx_secao)
+                st.rerun()
         
-        # Checkbox para incluir ou não o tópico no Word Final
-        incluir_checkbox = st.checkbox(
-            "✅ Incluir este tópico no documento gerado", 
-            value=st.session_state.dados_laudo[topico].get('incluir', True), 
-            key=f"check_{topico}"
-        )
-        st.session_state.dados_laudo[topico]['incluir'] = incluir_checkbox
-        
-        # Opcional: Se desmarcar, oculta o conteúdo para o layout ficar mais limpo
-        if incluir_checkbox:
+        if secao['incluir']:
             col_esq, col_dir = st.columns([1, 1])
             
-            # --- LADO ESQUERDO ---
             with col_esq:
-                st.markdown("**1. Entrada de Dados (Rascunho / Áudio)**")
+                st.markdown("**1. Captação de Dados**")
                 
-                audio_gravado = st.audio_input(f"Gravar relato ({topico})", key=f"audio_{topico}")
-                
-                if st.button("Transcrever Áudio 🎙️", key=f"btn_transcrever_{topico}", disabled=not audio_gravado):
-                    if chave_api:
-                        with st.spinner("Transcrevendo..."):
-                            texto_transcrito = transcrever_audio(chave_api, audio_gravado.getvalue())
-                            if texto_transcrito:
-                                texto_existente = st.session_state.dados_laudo[topico]['rascunho']
-                                texto_combinado = f"{texto_existente}\n{texto_transcrito}".strip()
-                                
-                                st.session_state.dados_laudo[topico]['rascunho'] = texto_combinado
-                                st.session_state[f"txt_rasc_{topico}"] = texto_combinado
-                                st.rerun()
-                    else:
-                        st.error("Insira a chave da API na lateral.")
+                audio_gravado = st.audio_input(f"Gravação de áudio em campo", key=f"audio_{sec_id}")
+                if audio_gravado:
+                    if st.button("Adicionar à Fila de Transcrição", key=f"add_fila_{sec_id}"):
+                        secao['fila_audios'].append({"id": str(uuid.uuid4()), "nome": f"Registro de Áudio {len(secao['fila_audios']) + 1}", "bytes": audio_gravado.getvalue()})
+                        st.success("Áudio registrado na fila.")
+                        st.rerun()
 
-                rascunho_atual = st.text_area(
-                    "Texto Rascunho:", 
-                    height=150, 
-                    key=f"txt_rasc_{topico}"
-                )
-                st.session_state.dados_laudo[topico]['rascunho'] = rascunho_atual
-                
-                fotos_upadas = st.file_uploader(
-                    "Anexar Fotos para esta seção", 
-                    type=["jpg", "jpeg", "png"], 
-                    accept_multiple_files=True, 
-                    key=f"fotos_{topico}"
-                )
-                if fotos_upadas:
-                    st.session_state.dados_laudo[topico]['fotos'] = fotos_upadas
+                if secao['fila_audios']:
+                    for idx_aud, aud in enumerate(secao['fila_audios']):
+                        ca1, ca2 = st.columns([4, 1])
+                        ca1.caption(f"Arquivo pendente: {aud['nome']}")
+                        if ca2.button("Remover", key=f"del_aud_{sec_id}_{aud['id']}"):
+                            secao['fila_audios'].pop(idx_aud)
+                            st.rerun()
+                    if st.button("Processar Fila de Transcrição", key=f"btn_transc_{sec_id}", type="primary"):
+                        if chave_api:
+                            with st.spinner("Processando áudios via IA..."):
+                                novos = [transcrever_audio(chave_api, a['bytes']) for a in secao['fila_audios']]
+                                validos = [t for t in novos if t]
+                                if validos:
+                                    combo = f"{st.session_state[f'txt_rasc_{sec_id}']}\n\n" + "\n\n".join(validos)
+                                    st.session_state[f"txt_rasc_{sec_id}"] = combo.strip()
+                                    secao['fila_audios'].clear()
+                                    st.rerun()
+                        else: 
+                            st.error("Chave API não informada.")
 
-            # --- LADO DIREITO ---
+                st.markdown("**Inserção Rápida de Textos Padrão:**")
+                snip_sel = st.selectbox("Selecione um texto técnico", ["Selecionar texto..."] + list(st.session_state.frases_padrao.keys()), key=f"sel_snip_{sec_id}", label_visibility="collapsed")
+                if st.button("Inserir Texto", key=f"btn_snip_{sec_id}"):
+                    if snip_sel != "Selecionar texto...":
+                        st.session_state[f"txt_rasc_{sec_id}"] += f"\n{st.session_state.frases_padrao[snip_sel]}"
+                        st.rerun()
+
+                secao['rascunho'] = st.text_area("Texto Rascunho / Anotações:", value=st.session_state[f"txt_rasc_{sec_id}"], height=150, key=f"txt_rasc_{sec_id}")
+                
             with col_dir:
-                st.markdown("**2. Processamento IA e Texto Final**")
-                
-                if st.button("🪄 Converter p/ Laudo (IA)", key=f"btn_ia_{topico}", type="secondary"):
-                    if not chave_api:
-                        st.error("Insira a chave da API na lateral.")
-                    elif not rascunho_atual.strip():
-                        st.warning("Não há rascunho para converter. Escreva ou grave um áudio.")
+                st.markdown("**2. Estruturação Técnica**")
+                if st.button("Gerar Texto Técnico (IA)", key=f"btn_ia_{sec_id}", type="secondary"):
+                    if not chave_api: 
+                        st.error("Chave API não informada.")
+                    elif not secao['rascunho'].strip(): 
+                        st.warning("O rascunho está vazio. Insira informações antes de processar.")
                     else:
-                        with st.spinner("Processando linguagem técnica..."):
-                            texto_gerado = processar_texto_ia(
-                                chave_api, 
-                                tipo_laudo_selecionado, 
-                                topico, 
-                                rascunho_atual, 
-                                modelo_1_texto, 
-                                modelo_2_texto
-                            )
-                            if texto_gerado:
-                                st.session_state.dados_laudo[topico]['final'] = texto_gerado
-                                st.session_state[f"txt_final_{topico}"] = texto_gerado
+                        with st.spinner("Formatando estrutura e linguagem técnica..."):
+                            txt = processar_texto_ia(chave_api, tipo_laudo_selecionado, secao['titulo'], secao['rascunho'], modelo_1_texto, modelo_2_texto)
+                            if txt:
+                                st.session_state[f"txt_final_{sec_id}"] = txt
                                 st.rerun()
 
-                texto_final_atual = st.text_area(
-                    "Texto Convertido (Pronto para o Laudo):", 
-                    height=250, 
-                    key=f"txt_final_{topico}"
-                )
-                st.session_state.dados_laudo[topico]['final'] = texto_final_atual
+                secao['final'] = st.text_area("Texto Final Revisado:", value=st.session_state[f"txt_final_{sec_id}"], height=250, key=f"txt_final_{sec_id}")
+
+            st.divider()
+            st.markdown("**Galeria de Registros Fotográficos**")
+            fotos_up = st.file_uploader("Selecionar Imagens Locais", type=["jpg", "jpeg", "png"], accept_multiple_files=True, key=f"up_{sec_id}")
+            if st.button("Armazenar Imagens", key=f"btn_salv_{sec_id}"):
+                if fotos_up:
+                    for f in fotos_up: secao['fotos'].append({'id': str(uuid.uuid4()), 'bytes': f.getvalue(), 'legenda': ''})
+                    st.rerun()
+
+            if secao['fotos']:
+                cols = st.columns(3)
+                for i_foto, f_dict in enumerate(secao['fotos']):
+                    with cols[i_foto % 3]:
+                        st.image(f_dict['bytes'], use_container_width=True)
+                        nova_leg = st.text_area("Legenda Técnica", value=f_dict['legenda'], key=f"leg_{sec_id}_{f_dict['id']}", height=80)
+                        f_dict['legenda'] = nova_leg
+                        
+                        cg1, cg2 = st.columns([3, 1])
+                        if cg1.button("Sugerir Legenda (IA)", key=f"btn_leg_ia_{sec_id}_{f_dict['id']}"):
+                            if chave_api:
+                                with st.spinner("Analisando vestígios visuais..."):
+                                    f_dict['legenda'] = gerar_legenda_foto_ia(chave_api, f_dict['bytes'])
+                                    st.rerun()
+                            else:
+                                st.error("Chave API não informada.")
+                        if cg2.button("Excluir", key=f"del_f_{sec_id}_{f_dict['id']}", help="Remover imagem do laudo"):
+                            secao['fotos'].remove(f_dict)
+                            st.rerun()
