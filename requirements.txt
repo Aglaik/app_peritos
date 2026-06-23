@@ -1,3 +1,6 @@
 streamlit
 google-generativeai
 python-docx
+requests
+Pillow
+streamlit-geolocation
