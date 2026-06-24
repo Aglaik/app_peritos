@@ -291,7 +291,7 @@ def gerar_documento_word(tipo_laudo, arquivo_template=None):
 # ==========================================
 # 4. INTERFACE PRINCIPAL (UI)
 # ==========================================
-st.title("Assistente de Laudos AG-Laudos")
+st.title("Assistente de Laudos")
 
 modelo_1_texto, modelo_2_texto = carregar_modelos_txt()
 
