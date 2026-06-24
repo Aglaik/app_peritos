@@ -1,0 +1,94 @@
+LAUDO PERICIAL
+
+Aos DD dias do mês de (MÊS) de YYYY, nesta cidade de São Paulo e no Instituto de Criminalística, da Superintendência da Polícia Técnico-Científica da Secretaria da Segurança Pública do Estado de São Paulo, de conformidade com o disposto no Art. 178 do Decreto-Lei nº 3.689 de 03 de Outubro de 1941, pelo Perito Criminal Diretor deste Instituto de Criminalística Dr. Chefe da Criminalística, foi designado o Perito Criminal MEU_NOME, para proceder ao exame supra especificado, em atendimento à requisição do(a) Delegado(a) de Polícia.
+
+
+1.	HISTÓRICO
+
+Relato breve do fato que originou a requisição – quando, como, quem, onde, o quê, etc.. Algumas vezes neste tópico são incluídas as informações referentes ao Capítulo 4.
+
+2.	OBJETIVO
+
+São descritos os objetivos a serem buscados nos exames que devem estar alinhados com a requisição da perícia. Algumas vezes neste tópico são incluídas as informações referentes ao Capítulo 3.
+
+3.	DOS QUESITOS
+
+Detalhamento dos quesitos a serem respondidos na presente perícia, se houver quesitos.
+
+4.	ISOLAMENTO E PRESERVAÇÃO DO LOCAL
+
+Devem ser consignadas informações referentes ao isolamento e preservação do local.
+
+5.	DOS EXAMES
+
+Ações relacionadas ao processamento de local, exames do cadáver e dos demais vestígios e, quando cabível, a descrição da metodologia e dos equipamentos utilizados. A ordem dos subtópicos pode ser flexibilizada, de acordo com a perícia realizada, para dar maior fluidez e clareza ao texto.
+
+5.1.	Do local
+
+Descrever os locais mediatos, imediatos e relacionados, atentando-se para a descrição do geral para o particular.
+Em ocorrências envolvendo acidentes de trânsito, devem ser detalhadas as características da via pública de interesse à elucidação do fato (Desenvolvimento topográfico; Leito carroçável; Pavimentação; Iluminação; Sinalização; Visibilidade)
+
+5.2.	Dos veículos
+
+Descrever o(s) veículos envolvido(s), suas características (marca/modelo/cor/placas), detalhando os exames realizados de acordo com o tipo de ocorrência (por exemplo, em acidentes de trânsito reportar o exame dos sistemas de direção, freios, iluminação, air bags, cinto de segurança e estado dos pneus, bem como os danos apresentados), ou se for o caso, a identificação veicular.
+
+5.3.	Do cadáver
+
+Fotografias, inclusive conforme artigo 164 do CPP.
+	Devem constar as seguintes informações:
+
+	Identificação
+
+Descrever as características do cadáver – sexo, compleição etc. – e, quando possível, fazer constar sua identificação legal.
+
+	Vestes e acessórios
+
+Descrever as vestes e os vestígios nelas encontrados – ausência de botões, rompimento de costuras, rasgamentos, perfurações, manchas etc. Descrever os acessórios utilizados pelo cadáver – colar, pulseira, anel, carteiras, documentos etc.
+
+	Posição
+
+Descrever a posição do cadáver e de seus membros – decúbito ventral, dorsal, lateral, membros inferiores, superiores etc.
+
+	Perinecroscopia
+
+Descrição e fotografia das lesões/feridas e demais vestígios presentes no corpo. Quando o perito criminal julgar necessário, relatar nesse item as conclusões do Laudo Cadavérico ou dos exames realizados no Instituto de Medicina Legal.
+
+5.4.	Dos demais vestígios
+
+Descrever sua posição em relação ao cadáver/local, inter-relacionando-os e informando acerca de sua coleta e encaminhamento. 
+
+(ex. em acidentes de trânsito: No local e na pista, no sentido estudado foram encontrados:)
+
+6.	CONSIDERAÇÕES TÉCNICO-CIENTÍFICAS (OU TÉCNICO-PERICIAIS)
+
+Informações técnicas e científicas que servirão de base para a análise e interpretação, caso necessário.
+
+7.	DISCUSSÃO
+
+Item destinado a assegurar afirmações subsidiadas nas análises e interpretações dos vestígios constatados, bem como nos respectivos resultados de exames - afastando possibilidades capazes de gerar afirmações contraditórias - que subsidiarão a conclusão. Neste item, os Peritos Criminais também registrarão as alterações do estado das coisas e discutirão as consequências dessas alterações na dinâmica dos fatos, conforme parágrafo único do artigo 169 do CPP.
+
+7.1.	Análise e interpretação de vestígios
+
+Analisar e interpretar vestígios.
+
+7.2.	Dinâmica do evento
+
+Descrever, com base na interpretação dos vestígios, a provável maneira de como ocorreu o evento.
+
+8.	CONCLUSÃO E/OU RESPOSTAS AOS QUESITOS
+
+Deve ser uma consequência natural do que foi argumentado, interpretado e discutido. A resposta aos quesitos deve ser realizada na sequência formulada – artigo 160 do CPP – transcrição dos quesitos.
+
+
+Era o que havia a relatar.
+
+*********************************************************
+
+Este laudo vai impresso no anverso de X folhas deste papel, dele ficando arquivado original, assinado digitalmente, no sistema de Gestão de Laudos da ACADEPOL-SP. Ilustram-no X fotografias digitais.
+
+9.	REFERÊNCIAS
+
+10.	ANEXOS E APÊNDICES
+
+Fotografias, croquis, desenhos esquemáticos, diagramas, etc. Tais itens, descritos nos anexos e apêndices, podem compor o corpo do laudo.
+
